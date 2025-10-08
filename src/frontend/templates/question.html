@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+{% if user.isAuth %}
+<h2>Gestion des questions</h2>
+
+<!-- Boutons de contrôle du tableau -->
+<div class="button-info-container">
+    <div>
+        <button id="loadQ" type="button">Recharger les questions</button>
+    </div>
+    <div id="resultMessage"></div>
+</div>
+
+<!-- Tableau des questions -->
+<div class="card-container">
+    <card class="scroll-card" id="scroll-card" style="display:none;">
+        <table id="questionsTable">
+            <thead>
+                <tr>
+                    <th id="id">ID</th>
+                    <th id="question">Question</th>
+                    <th id="subject">sujet</th>
+                    <th id="use">usage</th>
+                    <th id="author">créé par</th>
+                    <th id="date">date</th>
+                    <th id="actions">actions</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </card>
+</div>
+
+<!-- Boutons de création et import -->
+<div class="button-info-container">
+    <div>
+        <p>Saisie des éléments d'une nouvelle question</p>
+        <button id="createQ" type="button">Créer une nouvelle question</button>
+    </div>
+    <div class="import-csv">{% include "upload_csv.html" %}</div>
+</div>
+
+<h2>Détail du questionnaire sélectionné</h2>
+<!-- Boutons de création et import -->
+<div class="button-info-container">
+
+    {% include "questionnaire-detail.html" %}
+
+</div>
+
+<!-- Modal (contient TOUT le formulaire) -->
+{% include "question-modale.html" %}
+
+{% else %}
+<h1>Vous n'avez pas les droits.</h1>
+<p>Login ou mot de passe incorrect.</p>
+{% endif %}
+
+<script>
+    window.APP_CONFIG = {
+        token: "{{ token }}",
+        apiUrl: "http://localhost:8000/api",
+        userId: "{{ user.id }}",
+        questionnaireId: "{{ questionnaire_id }}"
+    };
+</script>
+
+<script src="{{ url_for('static', filename='scripts/table.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='scripts/question/index.js' )}}"></script>
+<script type="module" src="{{ url_for('static', filename='scripts/questionnaire/questionnaire-detail.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const qrInfo = document.getElementById('QR-info');
+        const selectQRBtn = document.getElementById('selectQR');
+        const questionnaireId = window.APP_CONFIG.questionnaireId;
+        if (!questionnaireId || questionnaireId === 'null' || questionnaireId === 'None' || questionnaireId === '') {
+            qrInfo.textContent = 'Aucun questionnaire sélectionné';
+            selectQRBtn.textContent = 'Choisir un questionnaire';
+        } else {
+            qrInfo.textContent = `Questionnaire selectionné : ${questionnaireId}`;
+            selectQRBtn.textContent = 'Changer de questionnaire';
+        }
+
+        selectQRBtn.addEventListener('click', function () {
+            window.location.href = '/questionnaire';
+        });
+    });
+</script>
+{% endblock content %}
