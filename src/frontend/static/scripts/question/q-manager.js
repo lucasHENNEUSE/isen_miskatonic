@@ -1,14 +1,20 @@
-// question-manager.js - Manager principal refactorisé
-import { Utils } from '../utils/utils.js'
 import { ApiService as QApiService } from '../utils/api-service.js'
 import { SelectManager } from '../utils/select-manager.js'
 import { ResponseManager } from '../utils/response-manager.js'
 import { QuestionFormValidator } from '../utils/form-validator.js'
 import { QuestionModalManager } from './question-modale-manager.js'
+import {
+  BaseManager,
+  ActionButtonBuilder,
+  ModalHelper,
+  ValidationHelper,
+  EventBus,
+  PermissionChecker
+} from '../utils/managers-utils.js'
 
-export class QuestionManager {
+export class QuestionManager extends BaseManager {
   constructor () {
-    this.config = window.APP_CONFIG || {}
+    super()
     this.elements = this.getElements()
     this.currentQuestionId = null
 
@@ -26,6 +32,7 @@ export class QuestionManager {
       this.elements,
       this.responseManager
     )
+
     this.modalManager = new QuestionModalManager(
       this.elements,
       this.responseManager,
@@ -72,16 +79,15 @@ export class QuestionManager {
     }
   }
 
-  showMessage (msg, type = 'info') {
-    const target = this.elements.feedback || this.elements.resultMessage
-    target.classList.remove('success', 'error')
-    Utils.showMessage(target, msg, type)
+  getFeedbackElement () {
+    return this.elements.feedback || this.elements.resultMessage
   }
 
   // ===== ACTIONS PUBLIQUES =====
+
   async openQuestionModal (id, mode) {
     try {
-      this.showMessage('')
+      this.showMessage('', 'info', this.getFeedbackElement())
       this.currentQuestionId = id
       const data = await this.apiService.fetchQuestion(id)
       this.modalManager.populateModal(data, mode)
@@ -90,50 +96,24 @@ export class QuestionManager {
         this.setupEditSubmission(data)
       }
     } catch (error) {
-      this.showMessage(`Erreur chargement: ${error.message}`, 'error')
-    }
-  }
-
-  async openQuestionModal (id, mode) {
-    try {
-      this.showMessage('')
-      this.currentQuestionId = id
-      const data = await this.apiService.fetchQuestion(id)
-      this.modalManager.populateModal(data, mode)
-
-      if (mode === 'edit') {
-        this.setupEditSubmission(data)
-      }
-    } catch (error) {
-      this.showMessage(`Erreur chargement: ${error.message}`, 'error')
+      this.showMessage(
+        `Erreur chargement: ${error.message}`,
+        'error',
+        this.getFeedbackElement()
+      )
     }
   }
 
   setupEditSubmission (originalData) {
-    const submitBtn = this.elements.submitBtn
-    if (!submitBtn) return
+    const { newSubmit, newReset } = ModalHelper.setupEditSubmission(
+      this.elements.submitBtn,
+      this.elements.resetBtn,
+      async () => await this.handleEditSubmit(),
+      () => this.modalManager.populateModal(originalData, 'edit')
+    )
 
-    // Nettoie les anciens handlers
-    const newBtn = submitBtn.cloneNode(true)
-    submitBtn.parentNode.replaceChild(newBtn, submitBtn)
-    this.elements.submitBtn = newBtn
-
-    newBtn.addEventListener('click', async e => {
-      e.preventDefault()
-      await this.handleEditSubmit()
-    })
-
-    // Bouton reset
-    const resetBtn = this.elements.resetBtn
-    if (resetBtn) {
-      const newReset = resetBtn.cloneNode(true)
-      resetBtn.parentNode.replaceChild(newReset, resetBtn)
-      this.elements.resetBtn = newReset
-
-      newReset.addEventListener('click', () => {
-        this.modalManager.populateModal(originalData, 'edit')
-      })
-    }
+    if (newSubmit) this.elements.submitBtn = newSubmit
+    if (newReset) this.elements.resetBtn = newReset
   }
 
   async handleEditSubmit () {
@@ -141,26 +121,37 @@ export class QuestionManager {
       const payload = this.modalManager.collectFormData()
 
       if (!payload.question) {
-        this.showMessage("L'intitulé est requis.", 'error')
+        this.showMessage(
+          "L'intitulé est requis.",
+          'error',
+          this.getFeedbackElement()
+        )
         return
       }
 
       await this.apiService.updateQuestion(this.currentQuestionId, payload)
       this.modalManager.closeModal()
+
+      const shortId = this.formatId(this.currentQuestionId)
       this.showMessage(
-        `Question ${this.currentQuestionId} modifiée avec succès.`
+        `Question ..${shortId} modifiée avec succès.`,
+        'success',
+        this.getFeedbackElement()
       )
 
+      EventBus.questions.updated(payload)
+
       // Rafraîchir le tableau si disponible
-      if (
-        window.tableManager &&
-        typeof window.tableManager.refreshTable === 'function'
-      ) {
+      if (window.tableManager?.refreshTable) {
         window.tableManager.refreshTable()
       }
     } catch (error) {
       this.modalManager.closeModal()
-      this.showMessage(`Erreur modification: ${error.message}`, 'error')
+      this.showMessage(
+        `Erreur modification: ${error.message}`,
+        'error',
+        this.getFeedbackElement()
+      )
     }
   }
 
@@ -168,15 +159,20 @@ export class QuestionManager {
     try {
       const data = await this.apiService.fetchQuestion(id)
 
-      // Émet un événement custom pour le module quiz
-      const event = new CustomEvent('question:add-to-quiz', {
-        detail: { question: data }
-      })
-      window.dispatchEvent(event)
+      EventBus.questions.addToQuiz(data)
 
-      this.showMessage(`Question ${id} ajoutée au quizz.`)
+      const shortId = this.formatId(id)
+      this.showMessage(
+        `Question ..${shortId} ajoutée au quizz.`,
+        'success',
+        this.getFeedbackElement()
+      )
     } catch (error) {
-      this.showMessage(`Erreur ajout au quizz: ${error.message}`, 'error')
+      this.showMessage(
+        `Erreur ajout au quizz: ${error.message}`,
+        'error',
+        this.getFeedbackElement()
+      )
     }
   }
 
@@ -192,7 +188,7 @@ export class QuestionManager {
       corrects,
       remark: this.elements.remarkInput?.value.trim() || null,
       status: this.elements.statusSelect?.value || 'draft',
-      created_by: window.APP_CONFIG?.user?.id || null,
+      created_by: this.config.user?.id || null,
       created_at: new Date().toISOString(),
       edited_at: null
     }
@@ -218,17 +214,21 @@ export class QuestionManager {
     // Validation côté client
     const validationErrors = this.validator.validateSubmissionPayload(payload)
     if (validationErrors.length > 0) {
-      this.showMessage(validationErrors[0], 'error')
+      this.showMessage(validationErrors[0], 'error', this.getFeedbackElement())
       return
     }
 
     if (!this.config.apiUrl) {
-      this.showMessage('Configuration API manquante.', 'error')
+      this.showMessage(
+        'Configuration API manquante.',
+        'error',
+        this.getFeedbackElement()
+      )
       return
     }
 
     try {
-      this.showMessage('Envoi en cours…')
+      this.showMessage('Envoi en cours…', 'info', this.getFeedbackElement())
 
       const response = await this.apiService.createQuestion(payload)
 
@@ -238,21 +238,20 @@ export class QuestionManager {
       const body = isJson ? await response.json() : await response.text()
 
       if (response.status === 201) {
-        let statusText = ''
-        switch (currentStatus) {
-          case 'draft':
-            statusText = ' en brouillon'
-            break
-          case 'active':
-            statusText = ' et activée'
-            break
-          case 'archive':
-            statusText = ' et archivée'
-            break
+        const statusTexts = {
+          draft: ' en brouillon',
+          active: ' et activée',
+          archive: ' et archivée'
         }
-        this.showMessage(`Question créée avec succès${statusText}.`)
+        const statusText = statusTexts[currentStatus] || ''
 
-        if (body && body.id && this.elements.feedback) {
+        this.showMessage(
+          `Question créée avec succès${statusText}.`,
+          'success',
+          this.getFeedbackElement()
+        )
+
+        if (body?.id && this.elements.feedback) {
           const link = document.createElement('a')
           link.href = `${this.config.apiUrl}/question/${encodeURIComponent(
             body.id
@@ -263,13 +262,12 @@ export class QuestionManager {
           this.elements.feedback.appendChild(link)
         }
 
+        EventBus.questions.created(body)
+
         this.modalManager.resetForm()
 
         // Rafraîchir le tableau si disponible
-        if (
-          window.tableManager &&
-          typeof window.tableManager.refreshTable === 'function'
-        ) {
+        if (window.tableManager?.refreshTable) {
           window.tableManager.refreshTable()
         }
 
@@ -290,10 +288,14 @@ export class QuestionManager {
         errorMessages[response.status] ||
         (typeof body === 'string' ? body : body?.message || 'Erreur serveur.')
 
-      this.showMessage(errorMsg, 'error')
+      this.showMessage(errorMsg, 'error', this.getFeedbackElement())
     } catch (err) {
       console.error('Erreur lors de la soumission:', err)
-      this.showMessage("Impossible d'atteindre le serveur.", 'error')
+      this.showMessage(
+        "Impossible d'atteindre le serveur.",
+        'error',
+        this.getFeedbackElement()
+      )
     }
 
     // Debug
@@ -302,104 +304,73 @@ export class QuestionManager {
 
   setupEventListeners () {
     // Modal
-    if (this.elements.createButton) {
-      this.elements.createButton.addEventListener('click', () =>
-        this.modalManager.openModal('create')
-      )
-    }
+    this.elements.createButton?.addEventListener('click', () =>
+      this.modalManager.openModal('create')
+    )
 
-    if (this.elements.closeBtn) {
-      this.elements.closeBtn.addEventListener('click', () =>
-        this.modalManager.closeModal()
-      )
-    }
+    this.elements.closeBtn?.addEventListener('click', () =>
+      this.modalManager.closeModal()
+    )
 
-    if (this.elements.modal) {
-      this.elements.modal.addEventListener('click', e => {
-        if (e.target === this.elements.modal) this.modalManager.closeModal()
-      })
-    }
+    ModalHelper.setupBackdropClose(this.elements.modal, () =>
+      this.modalManager.closeModal()
+    )
 
-    // Échap pour fermer le modal
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && this.elements.modal?.style.display !== 'none') {
-        this.modalManager.closeModal()
-      }
-    })
+    ModalHelper.setupEscapeClose(this.elements.modal, () =>
+      this.modalManager.closeModal()
+    )
 
     // Ajout d'options
-    if (this.elements.subjectAddBtn) {
-      this.elements.subjectAddBtn.addEventListener('click', () => {
-        SelectManager.addOptionIfMissing(
-          this.elements.subjectSelect,
-          this.elements.subjectAdd?.value
-        )
-        if (this.elements.subjectAdd) this.elements.subjectAdd.value = ''
-        this.validator.validateForm()
-      })
-    }
+    this.elements.subjectAddBtn?.addEventListener('click', () => {
+      SelectManager.addOptionIfMissing(
+        this.elements.subjectSelect,
+        this.elements.subjectAdd?.value
+      )
+      if (this.elements.subjectAdd) this.elements.subjectAdd.value = ''
+      this.validator.validateForm()
+    })
 
-    if (this.elements.useAddBtn) {
-      this.elements.useAddBtn.addEventListener('click', () => {
-        SelectManager.addOptionIfMissing(
-          this.elements.useSelect,
-          this.elements.useAdd?.value
-        )
-        if (this.elements.useAdd) this.elements.useAdd.value = ''
-        this.validator.validateForm()
-      })
-    }
+    this.elements.useAddBtn?.addEventListener('click', () => {
+      SelectManager.addOptionIfMissing(
+        this.elements.useSelect,
+        this.elements.useAdd?.value
+      )
+      if (this.elements.useAdd) this.elements.useAdd.value = ''
+      this.validator.validateForm()
+    })
 
     // Ajout de réponse
-    if (this.elements.addResponseBtn) {
-      this.elements.addResponseBtn.addEventListener('click', () =>
-        this.responseManager.addResponseRow()
-      )
-    }
+    this.elements.addResponseBtn?.addEventListener('click', () =>
+      this.responseManager.addResponseRow()
+    )
 
     // Soumission
-    if (this.elements.submitBtn) {
-      this.elements.submitBtn.addEventListener('click', e => this.submitForm(e))
-    }
-
-    if (this.elements.form) {
-      this.elements.form.addEventListener('submit', e => this.submitForm(e))
-    }
+    this.elements.submitBtn?.addEventListener('click', e => this.submitForm(e))
+    this.elements.form?.addEventListener('submit', e => this.submitForm(e))
 
     // Réinitialisation
-    if (this.elements.resetBtn) {
-      this.elements.resetBtn.addEventListener('click', () =>
-        this.modalManager.resetForm()
-      )
-    }
+    this.elements.resetBtn?.addEventListener('click', () =>
+      this.modalManager.resetForm()
+    )
 
     // Validation en temps réel
-    ;[this.elements.questionInput, this.elements.remarkInput].forEach(input => {
-      if (input) {
-        input.addEventListener('input', () => this.validator.validateForm())
-      }
-    })
-    ;[
-      this.elements.subjectSelect,
-      this.elements.useSelect,
-      this.elements.statusSelect
-    ].forEach(select => {
-      if (select) {
-        select.addEventListener('change', () => this.validator.validateForm())
-      }
-    })
+    ValidationHelper.attachRealTimeValidation(
+      {
+        inputs: [this.elements.questionInput, this.elements.remarkInput],
+        selects: [
+          this.elements.subjectSelect,
+          this.elements.useSelect,
+          this.elements.statusSelect
+        ]
+      },
+      this.validator
+    )
 
     // Observer pour les changements dans la liste des réponses
-    if (this.elements.responsesList && window.MutationObserver) {
-      const observer = new MutationObserver(() => {
-        this.validator.validateForm()
-        this.validator.updateStatusOptions()
-      })
-      observer.observe(this.elements.responsesList, {
-        childList: true,
-        subtree: true
-      })
-    }
+    ValidationHelper.setupMutationObserver(this.elements.responsesList, () => {
+      this.validator.validateForm()
+      this.validator.updateStatusOptions()
+    })
 
     // Délégation d'événements pour les actions du tableau
     document.addEventListener('click', ev => {
@@ -423,6 +394,7 @@ export class QuestionManager {
   async init () {
     await this.loadSelectData()
 
+    // Initialiser avec 2 réponses par défaut
     if (
       this.elements.responsesList &&
       this.elements.responsesList.children.length === 0

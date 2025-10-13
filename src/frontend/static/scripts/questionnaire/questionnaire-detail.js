@@ -1,4 +1,5 @@
-import { QRApiService } from './api-service.js'
+import { ApiService as QRApiService } from '../utils/api-service.js'
+import { QuestionnaireTableUtils } from './questionnaire-table-utils.js'
 
 class QuestionnaireDetail {
   constructor () {
@@ -6,8 +7,9 @@ class QuestionnaireDetail {
     this.apiService = new QRApiService(this.config)
     this.questionnaireId = this.config.questionnaireId
     this.currentQuestionnaire = null
-    this.draftQuestions = [] // Brouillon local des questions
+    this.draftQuestions = []
     this.hasUnsavedChanges = false
+    this.canEdit = false
 
     this.elements = this.getElements()
     this.init()
@@ -31,7 +33,7 @@ class QuestionnaireDetail {
       tbody: document.querySelector('#questionnaireTable tbody'),
       card: document.getElementById('questionnaire-questions-card'),
       container: document.querySelector('.questionnaire-view-container'),
-      feedback: document.getElementById('resultMessage'),
+      //feedback: document.getElementById('resultMessage'),
       cancelBtn: document.getElementById('qr-detail-cancel-btn'),
       saveBtn: document.getElementById('qr-detail-save-btn'),
       actionsContainer: document.getElementById('qr-detail-actions')
@@ -48,6 +50,8 @@ class QuestionnaireDetail {
   }
 
   showMessage (msg, type = 'info') {
+    const feedback = document.getElementById('resultMessage')
+    console.log('debug Detail Show Mssg', msg, this.elements.feedback)
     if (!this.elements.feedback) return
     this.elements.feedback.textContent = msg
     this.elements.feedback.dataset.type = type
@@ -123,8 +127,10 @@ class QuestionnaireDetail {
       this.showLoader()
 
       // Récupérer les données du questionnaire
-      const questionnaire = await this.apiService.fetchQuestionnaire(id)
+      const questionnaire = await this.apiService.fetchQuestionnaireById(id)
       this.currentQuestionnaire = questionnaire
+      this.canEdit =
+        String(questionnaire.created_by) === String(this.config.userId)
 
       // Initialiser le brouillon avec les questions actuelles
       this.draftQuestions = [...(questionnaire.questions || [])]
@@ -194,55 +200,18 @@ class QuestionnaireDetail {
   async renderTable (questions = []) {
     if (!this.elements.tbody) return
 
-    // Vider le tableau
-    this.elements.tbody.innerHTML = ''
-
-    // Si pas de questions
-    if (!questions || questions.length === 0) {
-      const tr = document.createElement('tr')
-      const td = document.createElement('td')
-      td.colSpan = 4
-      td.textContent = 'Aucune question dans ce questionnaire'
-      td.style.textAlign = 'center'
-      td.style.fontStyle = 'italic'
-      tr.appendChild(td)
-      this.elements.tbody.appendChild(tr)
-
-      if (this.elements.card) {
-        this.elements.card.style.display = 'block'
+    // Utiliser les utilitaires partagés pour le rendu
+    QuestionnaireTableUtils.renderQuestionsTable(
+      this.elements.tbody,
+      questions,
+      {
+        isReadonly: !this.canEdit,
+        callbacks: {
+          onMove: (index, direction) => this.moveQuestion(index, direction),
+          onRemove: (index, text) => this.removeQuestionByIndex(index, text)
+        }
       }
-      return
-    }
-
-    // Afficher les questions du brouillon
-    for (const [index, question] of questions.entries()) {
-      const tr = document.createElement('tr')
-
-      // Colonnes de données
-      const columns = [
-        { content: index + 1 },
-        { content: this.formatId(question.id) },
-        { content: question.question || '-' }
-      ]
-
-      columns.forEach(col => {
-        const td = document.createElement('td')
-        td.textContent = col.content
-        tr.appendChild(td)
-      })
-
-      // Colonne des actions
-      const actionsCell = document.createElement('td')
-      const actions = this.getActionsForQuestion(
-        question,
-        index,
-        questions.length
-      )
-      actions.forEach(action => actionsCell.appendChild(action))
-      tr.appendChild(actionsCell)
-
-      this.elements.tbody.appendChild(tr)
-    }
+    )
 
     // Afficher la carte
     if (this.elements.card) {
@@ -250,128 +219,48 @@ class QuestionnaireDetail {
     }
   }
 
-  // Création des boutons d'action
-  createActionButton ({
-    src,
-    title,
-    onClick,
-    disabled = false,
-    deleteClass = false
-  }) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'action-icon-btn'
-    btn.className += deleteClass ? ' delete' : ''
-    btn.title = title
-    btn.setAttribute('aria-label', title)
-
-    if (disabled) {
-      btn.disabled = true
-      btn.classList.add('disabled')
-    }
-
-    const img = new Image()
-    img.src = src
-    img.alt = title
-
-    btn.appendChild(img)
-    btn.addEventListener('click', e => {
-      e.preventDefault()
-      e.stopPropagation()
-      if (!disabled) onClick()
-    })
-
-    return btn
-  }
-
-  // Gestion des actions
-  getActionsForQuestion (question, index, totalQuestions) {
-    const actions = []
-
-    // Action "Monter"
-    actions.push(
-      this.createActionButton({
-        src: '/static/assets/icon-q-up.svg',
-        title: 'Monter la question',
-        onClick: () => this.moveQuestion(index, -1),
-        disabled: index === 0
-      })
-    )
-
-    // Action "Descendre"
-    actions.push(
-      this.createActionButton({
-        src: '/static/assets/icon-q-down.svg',
-        title: 'Descendre la question',
-        onClick: () => this.moveQuestion(index, 1),
-        disabled: index === totalQuestions - 1
-      })
-    )
-
-    // Action "Supprimer"
-    actions.push(
-      this.createActionButton({
-        src: '/static/assets/icon-q-unselect.svg',
-        title: 'Retirer la question',
-        onClick: () => this.removeQuestion(question.id, question.question),
-        deleteClass: true
-      })
-    )
-
-    return actions
-  }
-
   async moveQuestion (fromIndex, direction) {
-    const toIndex = fromIndex + direction
+    const result = QuestionnaireTableUtils.moveQuestion(
+      this.draftQuestions,
+      fromIndex,
+      direction
+    )
 
-    // Vérifier les limites
-    if (toIndex < 0 || toIndex >= this.draftQuestions.length)
-      return // Échanger les positions dans le brouillon
-    ;[this.draftQuestions[fromIndex], this.draftQuestions[toIndex]] = [
-      this.draftQuestions[toIndex],
-      this.draftQuestions[fromIndex]
-    ]
+    if (!result) return
 
-    // Marquer comme modifié
     this.hasUnsavedChanges = true
-
-    // Re-rendre le tableau
     await this.renderTable(this.draftQuestions)
-
-    // Mettre à jour l'état des boutons
     this.updateActionButtons()
-
-    // Afficher un message
     this.showMessage('Ordre modifié (non enregistré)', 'info')
   }
 
-  async removeQuestion (questionId, questionText) {
-    const shortQuestionText =
-      questionText.length > 50
-        ? questionText.substring(0, 50) + '...'
-        : questionText
+  async removeQuestionByIndex (index, questionText) {
+    const result = QuestionnaireTableUtils.removeQuestion(
+      this.draftQuestions,
+      index,
+      questionText
+    )
 
-    if (
-      !confirm(
-        `Êtes-vous sûr de vouloir retirer cette question du questionnaire ?\n\n"${shortQuestionText}"`
-      )
-    ) {
-      return
-    }
+    if (!result) return
 
-    // Filtrer la question à supprimer du brouillon
-    this.draftQuestions = this.draftQuestions.filter(q => q.id !== questionId)
-
-    // Marquer comme modifié
     this.hasUnsavedChanges = true
-
-    // Re-rendre le tableau
     await this.renderTable(this.draftQuestions)
-
-    // Mettre à jour l'état des boutons
     this.updateActionButtons()
+    this.showMessage('Question retirée (non enregistré)', 'info')
+  }
 
-    // Afficher un message
+  async removeQuestion (questionId, questionText) {
+    const result = QuestionnaireTableUtils.removeQuestionById(
+      this.draftQuestions,
+      questionId,
+      questionText
+    )
+
+    if (!result) return
+
+    this.hasUnsavedChanges = true
+    await this.renderTable(this.draftQuestions)
+    this.updateActionButtons()
     this.showMessage('Question retirée (non enregistré)', 'info')
   }
 
@@ -393,10 +282,6 @@ class QuestionnaireDetail {
   formatArray (arr, defaultValue = '-') {
     if (!Array.isArray(arr) || arr.length === 0) return defaultValue
     return arr.join(', ')
-  }
-
-  formatId (id) {
-    return String(id ?? '').slice(-4)
   }
 
   // Méthode publique pour ajouter une question au questionnaire
@@ -469,13 +354,14 @@ class QuestionnaireDetail {
     if (this.elements.actionsContainer) {
       this.elements.actionsContainer.style.display = 'flex'
     }
+    const shouldDisable = !this.hasUnsavedChanges || !this.canEdit
 
     if (this.elements.cancelBtn) {
-      this.elements.cancelBtn.disabled = !this.hasUnsavedChanges
+      this.elements.cancelBtn.disabled = shouldDisable
     }
 
     if (this.elements.saveBtn) {
-      this.elements.saveBtn.disabled = !this.hasUnsavedChanges
+      this.elements.saveBtn.disabled = shouldDisable
     }
   }
 
