@@ -11,6 +11,7 @@ class Database:
     """
     Classe pour gérer la connexion à MongoDB avec pymongo (version synchrone).
     Utilise des class methods pour un accès singleton.
+    Crée automatiquement la base de données et les collections si elles n'existent pas.
     """
 
     _lock = threading.RLock()
@@ -41,9 +42,46 @@ class Database:
         cls._mongodb_uri = f"mongodb://{cls._mongo_host}:{cls._mongo_port}/"
 
     @classmethod
+    def _create_collections(cls):
+        """
+        Crée les collections nécessaires si elles n'existent pas.
+        MongoDB crée automatiquement les bases et collections au premier insert,
+        mais on peut les créer explicitement pour ajouter des validations ou indexes.
+        """
+        try:
+            existing_collections = cls._db.list_collection_names()
+
+            # Collection questions
+            if "questions" not in existing_collections:
+                cls._db.create_collection("questions")
+                print("Collection 'questions' créée")
+
+                # Optionnel: Créer des index pour optimiser les requêtes
+                cls._db["questions"].create_index("id")
+                print("Index créé sur 'questions.id'")
+            else:
+                print("Collection 'questions' déjà existante")
+
+            # Collection questionnaires
+            if "questionnaires" not in existing_collections:
+                cls._db.create_collection("questionnaires")
+                print("Collection 'questionnaires' créée")
+
+                # Optionnel: Créer des index
+                cls._db["questionnaires"].create_index("id")
+                print("Index créé sur 'questionnaires.id'")
+            else:
+                print("Collection 'questionnaires' déjà existante")
+
+        except Exception as e:
+            print(f"Erreur lors de la création des collections: {e}")
+            raise
+
+    @classmethod
     def init_db(cls):
         """
         Initialise la connexion à MongoDB (version synchrone).
+        Crée la base de données et les collections si nécessaire.
         """
         with cls._lock:
             if cls._mongodb_uri is None:
@@ -64,12 +102,24 @@ class Database:
                 cls._client.admin.command("ping")
                 print("Connexion MongoDB réussie")
 
-                # Sélectionner la base et la collection
+                # Sélectionner la base de données (la crée si elle n'existe pas)
                 cls._db = cls._client[cls._db_name]
+
+                # Vérifier si la base existe déjà
+                existing_dbs = cls._client.list_database_names()
+                if cls._db_name not in existing_dbs:
+                    print(f"Base de données '{cls._db_name}' créée")
+                else:
+                    print(f"Base de données '{cls._db_name}' existante")
+
+                # Créer les collections nécessaires
+                cls._create_collections()
+
+                # Sélectionner la collection par défaut
                 cls._collection = cls._db[cls._collection_name]
 
                 print(f"Base de données: {cls._db_name}")
-                print(f"Collection: {cls._collection_name}")
+                print(f"Collection par défaut: {cls._collection_name}")
 
             except Exception as e:
                 print(f"Erreur connexion MongoDB: {e}")
