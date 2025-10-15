@@ -18,6 +18,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Le script SQLite de création de la Base Utilisateurs se trouve dans `./db/script_creation.sql`, la base est créée lors de la connexion si absente.
+
 Pour exécuter le projet Miskatonic, il suffit d’abord de lancer la base de données MongoDB dans un conteneur Docker à l’aide de la commande `docker-compose up -d`. MongoBD sera exposé sur le port `http://localhost:27018`
 
 Une fois la base en place, le fichier `main.py` permet de démarrer séquenciellement le backend FastAPI puis le frontend Flask en multithread.
@@ -31,6 +33,12 @@ L’interface utilisateur est disponible sur `http://localhost:5005`
 Le serveur FastAPI, qui expose l’API RESTful et la documentation interactive OpenAPI, est accessible à l’adresse `http://localhost:8000/docs`
 
 Cette configuration permet de gérer facilement les QCM via l’interface web tout en offrant une API intégrable à d’autres systèmes.
+
+la documentation des modèles et des classes/méthodes est au format docstring est peut être consulté avec `pdoc` ; ouvrir le seveur pdac dans le navigateur après lancement :
+
+```bash
+pdoc ./src
+```
 
 Prérequis:
 Python 3.12
