@@ -4,7 +4,7 @@ tandis que le frontend utilise Flask pour une interface utilisateur intuitive.
 ## Fonctionnalités:
 
 Génération automatique de QCM à partir de modèles prédéfinis.
-Interface utilisateur pour la gestion des questions et des réponses.
+Interface utilisateur pour la gestion des questions et des réponses
 API RESTful pour l'intégration avec d'autres systèmes.
 Support de Docker pour une installation et un déploiement simplifiés.
 
