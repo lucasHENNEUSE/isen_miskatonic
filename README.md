@@ -1,6 +1,9 @@
 Miskatonic est une application web permettant de générer et de gérer des QCM (Questionnaires à Choix Multiples). Le backend est développé avec FastAPI pour sa rapidité et sa simplicité,
 tandis que le frontend utilise Flask pour une interface utilisateur intuitive.
 
+Le développement incrémentiel a été plannifié avec Jira. Cette application est monorepo, avec un dossier src/backend et src/frontend.
+Le dossier `./documentation` Contient le schéma de la bdd Utilisateurs, un template des questions et questionnaire MongoDB (Models du backend), ainsi que les user-stories.
+
 ## Fonctionnalités:
 
 Génération automatique de QCM à partir de modèles prédéfinis.
@@ -43,3 +46,10 @@ pdoc ./src
 Prérequis:
 Python 3.12
 Docker
+
+## Details
+
+Des fichiers README spécifiques documentent le backend et le frontend.
+
+[> backend](./src/backend/readme.backend.md)  
+[> frontend](./src/frontend/readme.frontend.md)
